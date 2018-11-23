@@ -1,0 +1,221 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Softether VPN - Amazon EC2'
+
+Parameters:
+
+  InstanceType:
+    Type: String
+    Default: t2.micro
+
+  ImageId:
+    Type: AWS::EC2::Image::Id
+    Description: AMI must be Amazon Linux 2.
+    Default: ami-009d6802948d06e52
+
+  VolumeSize:
+    Type: Number
+    Description: Node volume size
+    Default: 8
+
+  KeyName:
+    Description: The EC2 Key Pair to allow SSH access to the instances
+    Type: AWS::EC2::KeyPair::KeyName
+
+  VpcId:
+    Description: The VPC for VPN Server.
+    Type: AWS::EC2::VPC::Id
+
+  SubnetId:
+    Description: The subnet must be public subnet.
+    Type: AWS::EC2::Subnet::Id
+
+  SoftetherServerManagerPort:
+    Type: Number
+    Default: 443
+    AllowedValues:
+      - 443
+      - 992
+      - 1194
+      - 5555
+
+  SoftetherServerManagerSource:
+    Type: String
+    Default: 0.0.0.0/0
+
+  SoftetherSourceUrl:
+    Type: String
+    Default: https://github.com/SoftEtherVPN/SoftEtherVPN_Stable/releases/download/v4.25-9656-rtm/softether-vpnserver-v4.25-9656-rtm-2018.01.15-linux-x64-64bit.tar.gz
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "EC2 Instance Configuration"
+        Parameters:
+          - InstanceType
+          - ImageId
+          - VolumeSize
+          - KeyName
+      - Label:
+          default: "Network Configuration"
+        Parameters:
+          - VpcId
+          - SubnetId
+      - Label:
+          default: "Softether Configuration"
+        Parameters:
+          - SoftetherSourceUrl
+
+Resources:
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: "/"
+      Roles:
+      - !Ref Role
+
+  Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: "/"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2RoleforSSM
+        - arn:aws:iam::aws:policy/CloudWatchLogsFullAccess
+
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for all nodes in the cluster
+      VpcId:
+        !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: udp
+          FromPort: '500'
+          ToPort: '500'
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: udp
+          FromPort: '4500'
+          ToPort: '4500'
+          CidrIp: 0.0.0.0/0
+
+  SecurityGroupIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    DependsOn: SecurityGroup
+    Properties:
+      Description: Softether Server Manager
+      GroupId: !Ref SecurityGroup
+      CidrIp: !Ref SoftetherServerManagerSource
+      IpProtocol: tcp
+      FromPort: !Ref SoftetherServerManagerPort
+      ToPort: !Ref SoftetherServerManagerPort
+
+  Instance: 
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      ImageId: !Ref ImageId
+      KeyName: !Ref KeyName
+      IamInstanceProfile: !Ref InstanceProfile
+      SubnetId: !Ref SubnetId
+      SecurityGroupIds:
+        - !Ref SecurityGroup
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: !Ref VolumeSize
+            VolumeType: gp2
+            DeleteOnTermination: true
+      UserData:
+        Fn::Base64:
+          !Sub |
+            #cloud-config
+            merge_how: list(append)+dict(recurse_array)+str()
+            packages:
+              - amazon-ssm-agent
+              - awslogs
+              - wget
+              - gcc
+              - make
+            write_files:
+              - path: /etc/systemd/system/vpnserver.service
+                permissions: '0755'
+                content: |
+                  [Unit]
+                  Description=Softether VPN Server Service
+                  After=network.target
+                  ConditionPathExists=/opt/vpnserver/
+
+                  [Service]
+                  Type=forking
+                  User=root
+                  ExecStart=/opt/vpnserver/vpnserver start
+                  ExecStop=/opt/vpnserver/vpnserver stop
+                  Restart=on-abort
+                  WorkingDirectory=/opt/vpnserver/
+                  ExecStartPre=/sbin/ip link set dev eth0 promisc on
+
+                  [Install]
+                  WantedBy=multi-user.target
+              - path: /etc/awslogs/awslogs.conf
+                permissions: '0644'
+                content: |
+                  [general]
+                  state_file = /var/lib/awslogs/agent-state
+ 
+                  [/var/log/messages]
+                  datetime_format = %b %d %H:%M:%S
+                  file = /var/log/messages
+                  log_group_name = /var/log/messages
+                  log_stream_name = {instance_id}
+
+                  [/var/log/secure]
+                  datetime_format = %b %d %H:%M:%S
+                  file = /var/log/secure
+                  log_group_name = /var/log/secure
+                  log_stream_name = {instance_id}
+
+                  [/var/log/amazon/ssm/amazon-ssm-agent.log]
+                  datetime_format = %Y-%m-%d %H:%M:%S
+                  file = /var/log/amazon/ssm/amazon-ssm-agent.log
+                  log_group_name = /var/log/amazon/ssm/amazon-ssm-agent.log
+                  log_stream_name = {instance_id}
+
+                  [/opt/vpnserver/server_log]
+                  datetime_format = %Y-%m-%d %H:%M:%S.%f
+                  file = /opt/vpnserver/server_log/vpn_*.log
+                  log_group_name = /vpnserver/server_log
+                  log_stream_name = {instance_id}
+
+                  [/opt/vpnserver/security_log/DEFAULT]
+                  datetime_format = %Y-%m-%d %H:%M:%S.%f
+                  file = /opt/vpnserver/security_log/DEFAULT/sec_*.log
+                  log_group_name = /vpnserver/security_log
+                  log_stream_name = DEFAULT/{instance_id}
+
+                  [/opt/vpnserver/packet_log/DEFAULT]
+                  datetime_format = %Y-%m-%d,%H:%M:%S.%f
+                  file = /opt/vpnserver/packet_log/DEFAULT/pkt_*.log
+                  log_group_name = /vpnserver/packet_log
+                  log_stream_name = DEFAULT/{instance_id}
+            runcmd:
+              - wget -O - ${SoftetherSourceUrl} | tar zxvf - -C /opt
+              - cd /opt/vpnserver && make i_read_and_agree_the_license_agreement
+              - systemctl enable amazon-ssm-agent awslogsd vpnserver
+              - systemctl start amazon-ssm-agent awslogsd vpnserver
+
+  PublicIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      InstanceId: !Ref Instance
+      Domain: vpc

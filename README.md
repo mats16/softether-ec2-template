@@ -1,2 +1,3 @@
-# softether-docker
-Docker Image for Softether VPN
+# softether-ec2-template
+
+CloudFormation Template for Softether VPN on EC2
