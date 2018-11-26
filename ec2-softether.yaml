@@ -16,7 +16,7 @@ Parameters:
   VolumeSize:
     Type: Number
     Description: Node volume size
-    Default: 8
+    Default: 20
 
   KeyName:
     Description: The EC2 Key Pair to allow SSH access to the instances
@@ -144,7 +144,6 @@ Resources:
             packages:
               - amazon-ssm-agent
               - awslogs
-              - wget
               - gcc
               - make
             write_files:
@@ -154,15 +153,15 @@ Resources:
                   [Unit]
                   Description=Softether VPN Server Service
                   After=network.target
-                  ConditionPathExists=/opt/vpnserver/
+                  ConditionPathExists=/opt/softether/
 
                   [Service]
                   Type=forking
                   User=root
-                  ExecStart=/opt/vpnserver/vpnserver start
-                  ExecStop=/opt/vpnserver/vpnserver stop
+                  ExecStart=/opt/softether/vpnserver start
+                  ExecStop=/opt/softether/vpnserver stop
                   Restart=on-abort
-                  WorkingDirectory=/opt/vpnserver/
+                  WorkingDirectory=/opt/softether/
                   ExecStartPre=/sbin/ip link set dev eth0 promisc on
 
                   [Install]
@@ -209,8 +208,9 @@ Resources:
                   log_group_name = /vpnserver/packet_log
                   log_stream_name = DEFAULT/{instance_id}
             runcmd:
-              - wget -O - ${SoftetherSourceUrl} | tar zxvf - -C /opt
-              - cd /opt/vpnserver && make i_read_and_agree_the_license_agreement
+              - mkdir -m 755 /opt/softether
+              - curl -L ${SoftetherSourceUrl} | tar zxvf - -C /opt/softether --strip=1
+              - cd /opt/softether && make i_read_and_agree_the_license_agreement
               - systemctl enable amazon-ssm-agent awslogsd vpnserver
               - systemctl start amazon-ssm-agent awslogsd vpnserver
 
