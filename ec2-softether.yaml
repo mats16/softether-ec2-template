@@ -30,6 +30,10 @@ Parameters:
     Description: The subnet must be public subnet.
     Type: AWS::EC2::Subnet::Id
 
+  SoftetherServerManagerSource:
+    Type: String
+    Default: 0.0.0.0/0
+
   SoftetherServerManagerPort:
     Type: Number
     Default: 443
@@ -39,9 +43,10 @@ Parameters:
       - 1194
       - 5555
 
-  SoftetherServerManagerSource:
-    Type: String
-    Default: 0.0.0.0/0
+  SoftetherOpenVpnPort:
+    Description: The port for Open VPN via UDP.
+    Type: Number
+    Default: 1194
 
   SoftetherSourceUrl:
     Type: String
@@ -109,7 +114,7 @@ Resources:
           ToPort: '4500'
           CidrIp: 0.0.0.0/0
 
-  SecurityGroupIngress:
+  IngressServerManager:
     Type: AWS::EC2::SecurityGroupIngress
     DependsOn: SecurityGroup
     Properties:
@@ -119,6 +124,17 @@ Resources:
       IpProtocol: tcp
       FromPort: !Ref SoftetherServerManagerPort
       ToPort: !Ref SoftetherServerManagerPort
+
+  IngressOpenVpn:
+    Type: AWS::EC2::SecurityGroupIngress
+    DependsOn: SecurityGroup
+    Properties:
+      Description: for OpenVPN 
+      GroupId: !Ref SecurityGroup
+      CidrIp: 0.0.0.0/0
+      IpProtocol: udp
+      FromPort: !Ref SoftetherOpenVpnPort
+      ToPort: !Ref SoftetherOpenVpnPort
 
   Instance: 
     Type: AWS::EC2::Instance
